@@ -3,39 +3,49 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AI 视觉吹泡泡</title>
+    <title>Magic Bubbles</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
     
     <style>
+        * { box-sizing: border-box; }
         body {
             margin: 0;
             overflow: hidden;
-            background: radial-gradient(circle at center bottom, #0f2027, #203a43, #2c5364);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            color: white;
-            touch-action: none; /* 防止移动端双击缩放 */
+            /* 升级：糖果梦幻渐变背景 */
+            background: linear-gradient(135deg, #fbc2eb 0%, #a6c1ee 100%);
+            font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
+            color: #333;
+            touch-action: none;
         }
 
+        /* 隐藏原始视频 */
         .input_video { display: none; }
 
-        /* 预览窗口 */
-        #preview-container {
+        /* 预览窗口：美化版 */
+        #preview-wrapper {
             position: absolute;
             top: 20px;
             right: 20px;
-            width: 100px;
-            height: 133px;
-            border-radius: 12px;
+            width: 90px;
+            height: 120px;
+            border-radius: 16px;
             overflow: hidden;
-            border: 2px solid rgba(255,255,255,0.2);
             z-index: 20;
             background: #000;
-            transform: scaleX(-1);
-            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-            transition: all 0.3s ease;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            border: 3px solid rgba(255,255,255,0.8);
+            transform: scaleX(-1); /* 镜像 */
+            transition: all 0.2s;
+        }
+
+        /* 当检测到嘟嘴时，给预览框加特效 */
+        #preview-wrapper.active {
+            border-color: #00ff88;
+            box-shadow: 0 0 20px #00ff88;
+            transform: scaleX(-1) scale(1.1); /* 稍微放大 */
         }
         
         #preview-canvas {
@@ -44,7 +54,14 @@
             object-fit: cover;
         }
 
-        /* UI 层容器 */
+        /* 主画布 */
+        canvas#main-canvas {
+            position: absolute;
+            top: 0; left: 0;
+            z-index: 10;
+        }
+
+        /* UI 居中层 */
         #ui-layer {
             position: absolute;
             top: 0; left: 0; width: 100%; height: 100%;
@@ -53,248 +70,240 @@
             justify-content: center;
             align-items: center;
             z-index: 30;
-            pointer-events: none;
+            pointer-events: none; /* 让点击穿透 */
         }
 
-        /* --- 新增：加载动画样式 --- */
-        #loading-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            background: rgba(0, 20, 40, 0.6); /* 深色半透明背景 */
-            backdrop-filter: blur(10px); /* 毛玻璃效果 */
-            padding: 30px 40px;
-            border-radius: 20px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            transition: opacity 0.5s ease-out;
-        }
-
-        .bubble-loader {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-
-        .bubble-loader span {
-            display: inline-block;
-            width: 15px;
-            height: 15px;
-            margin: 0 6px;
-            background-color: #00d2ff; /* 使用主题青蓝色 */
-            border-radius: 50%;
-            box-shadow: 0 0 15px rgba(0, 210, 255, 0.6);
-            animation: bubbleBounce 1.4s infinite ease-in-out both;
-        }
-
-        /* 设置动画延迟，形成波浪感 */
-        .bubble-loader span:nth-child(1) { animation-delay: -0.32s; }
-        .bubble-loader span:nth-child(2) { animation-delay: -0.16s; }
-
-        @keyframes bubbleBounce {
-            0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
-            40% { transform: scale(1.2); opacity: 1; }
-        }
-
-        .loading-text {
-            font-size: 16px;
-            color: #fff;
+        /* 加载/控制面板：毛玻璃效果 */
+        #panel {
+            pointer-events: auto;
+            background: rgba(255, 255, 255, 0.65);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            padding: 30px;
+            border-radius: 24px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
             text-align: center;
-            line-height: 1.5;
+            max-width: 85%;
+            transition: opacity 0.3s;
         }
-        .loading-text small {
-            color: rgba(255,255,255,0.6);
-            font-size: 13px;
-            display: block;
-            margin-top: 5px;
-        }
-        /* --- 加载动画样式结束 --- */
 
+        h2 { margin: 0 0 10px 0; font-weight: 700; color: #444; }
+        p { margin: 0 0 20px 0; color: #666; font-size: 14px; line-height: 1.5; }
 
         #start-btn {
-            pointer-events: auto;
-            padding: 18px 45px;
-            font-size: 20px;
-            background: linear-gradient(45deg, #00d2ff, #3a7bd5);
-            border: none;
-            border-radius: 50px;
-            color: white;
-            font-weight: 600;
-            cursor: pointer;
-            box-shadow: 0 5px 25px rgba(0, 210, 255, 0.4);
             display: none; /* 初始隐藏 */
-            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+            padding: 16px;
+            font-size: 18px;
+            background: linear-gradient(90deg, #84fab0 0%, #8fd3f4 100%);
+            border: none;
+            border-radius: 12px;
+            color: #fff;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 10px 20px rgba(132, 250, 176, 0.4);
+        }
+        #start-btn:active { transform: scale(0.98); }
+
+        /* 灵敏度调节器 (滑块) */
+        #slider-container {
+            display: none; /* 开启后显示 */
+            pointer-events: auto;
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80%;
+            background: rgba(255,255,255,0.8);
+            padding: 15px 20px;
+            border-radius: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            z-index: 40;
+            text-align: center;
         }
         
-        #start-btn:active {
-            transform: scale(0.95);
-            box-shadow: 0 2px 10px rgba(0, 210, 255, 0.3);
+        #slider-label {
+            display: block;
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 8px;
+        }
+        
+        input[type=range] {
+            width: 100%;
+            accent-color: #84fab0;
         }
 
-        canvas#main-canvas {
-            position: absolute;
-            top: 0; left: 0;
-            z-index: 10;
+        .loading-spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border-left-color: #84fab0;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px auto;
         }
-        
-        #hint {
-            position: absolute;
-            bottom: 50px;
-            width: 100%;
-            text-align: center;
-            font-size: 15px;
-            color: rgba(255,255,255,0.8);
-            z-index: 15;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
-            letter-spacing: 1px;
-        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
     </style>
 </head>
 <body>
 
     <video class="input_video" playsinline></video>
     
-    <div id="preview-container">
+    <div id="preview-wrapper">
         <canvas id="preview-canvas"></canvas>
     </div>
 
     <div id="ui-layer">
-        <div id="loading-container">
-            <div class="bubble-loader">
-                <span></span><span></span><span></span>
+        <div id="panel">
+            <div id="loading-state">
+                <div class="loading-spinner"></div>
+                <h2>正在准备魔法...</h2>
+                <p>下载 AI 模型中 (约5-10秒)<br>请保持网络通畅</p>
             </div>
-            <div class="loading-text">
-                正在准备 AI 视觉引擎...
-                <small>(首次加载约需 5-10 秒，请耐心等待)</small>
-            </div>
+            
+            <button id="start-btn">开启摄像头体验</button>
         </div>
-        
-        <button id="start-btn">开启摄像头体验</button>
     </div>
 
-    <div id="hint">请对准右上角，做出“嘟嘴吹气”的动作</div>
+    <div id="slider-container">
+        <span id="slider-label">吹气灵敏度调节 (如果不出泡泡就往左拉)</span>
+        <input type="range" id="sensitivity" min="0.15" max="0.5" step="0.01" value="0.28">
+    </div>
+
     <canvas id="main-canvas"></canvas>
 
 <script>
     const videoElement = document.getElementsByClassName('input_video')[0];
+    const previewWrapper = document.getElementById('preview-wrapper');
     const previewCanvas = document.getElementById('preview-canvas');
     const previewCtx = previewCanvas.getContext('2d');
     const mainCanvas = document.getElementById('main-canvas');
     const ctx = mainCanvas.getContext('2d');
+    
+    const panel = document.getElementById('panel');
+    const loadingState = document.getElementById('loading-state');
     const startBtn = document.getElementById('start-btn');
-    // 获取新的加载容器和文本
-    const loadingContainer = document.getElementById('loading-container');
-    const loadingTextMain = document.querySelector('.loading-text');
-    const loadingTextSmall = document.querySelector('.loading-text small');
+    const sliderContainer = document.getElementById('slider-container');
+    const sensitivitySlider = document.getElementById('sensitivity');
     
     let width, height;
     let bubbles = [];
     let isBlowing = false;
     let faceMesh;
     let camera;
+    
+    // 默认阈值 (越小越容易触发，但也越容易误触)
+    let blowThreshold = 0.28;
+
+    sensitivitySlider.addEventListener('input', (e) => {
+        blowThreshold = parseFloat(e.target.value);
+    });
 
     function resize() {
         width = window.innerWidth;
         height = window.innerHeight;
         mainCanvas.width = width;
         mainCanvas.height = height;
-        previewCanvas.width = 300;
-        previewCanvas.height = 400;
+        previewCanvas.width = 180; // 降低预览分辨率提升性能
+        previewCanvas.height = 240;
     }
     window.addEventListener('resize', resize);
     resize();
 
-    // --- 泡泡类 (保持不变) ---
+    // --- 升级版泡泡视觉 ---
     class Bubble {
         constructor() {
-            this.x = width / 2 + (Math.random() - 0.5) * 100;
-            this.y = height + 20; 
-            this.size = Math.random() * 25 + 15;
-            this.speedY = Math.random() * 3 + 2.5;
+            this.x = width / 2 + (Math.random() - 0.5) * 150;
+            this.y = height + 30;
+            this.size = Math.random() * 30 + 10;
+            this.speedY = Math.random() * 4 + 2;
             this.step = Math.random() * Math.PI;
-            this.hue = Math.random() * 60 + 170;
-            this.opacity = 0.9;
+            this.color = `hsla(${Math.random() * 360}, 80%, 70%, 0.6)`; // 彩虹色
         }
         update() {
             this.y -= this.speedY;
-            this.step += 0.06;
-            this.x += Math.cos(this.step) * 1.8;
-            this.opacity -= 0.003;
+            this.step += 0.05;
+            this.x += Math.cos(this.step) * 1.5;
         }
         draw() {
             ctx.beginPath();
-            let gradient = ctx.createRadialGradient(
-                this.x - this.size/3, this.y - this.size/3, this.size/10,
-                this.x, this.y, this.size
-            );
-            gradient.addColorStop(0, `hsla(${this.hue}, 100%, 95%, ${this.opacity})`);
-            gradient.addColorStop(1, `hsla(${this.hue}, 100%, 65%, ${this.opacity * 0.3})`);
-            ctx.fillStyle = gradient;
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            // 填充色
+            ctx.fillStyle = this.color;
             ctx.fill();
-            ctx.strokeStyle = `hsla(${this.hue}, 100%, 90%, ${this.opacity * 0.6})`;
-            ctx.lineWidth = 1.2;
+            // 高光
+            ctx.strokeStyle = "rgba(255,255,255,0.8)";
+            ctx.lineWidth = 2;
             ctx.stroke();
+            // 亮点
             ctx.beginPath();
             ctx.arc(this.x - this.size/3, this.y - this.size/3, this.size/4, 0, Math.PI*2);
-            ctx.fillStyle = `rgba(255,255,255,${this.opacity*0.9})`;
+            ctx.fillStyle = "rgba(255,255,255,0.9)";
             ctx.fill();
         }
     }
 
-    function animateBubbles() {
+    function animate() {
         ctx.clearRect(0, 0, width, height);
+        
         if (isBlowing) {
-            if(Math.random() > 0.2) bubbles.push(new Bubble());
+            // 喷射泡泡
+            bubbles.push(new Bubble());
+            if(Math.random() > 0.5) bubbles.push(new Bubble());
         }
+
         for (let i = 0; i < bubbles.length; i++) {
             bubbles[i].update();
             bubbles[i].draw();
-            if (bubbles[i].y + bubbles[i].size < -50 || bubbles[i].opacity <= 0) {
+            if (bubbles[i].y < -50) {
                 bubbles.splice(i, 1);
                 i--;
             }
         }
-        requestAnimationFrame(animateBubbles);
+        requestAnimationFrame(animate);
     }
-    animateBubbles();
+    animate();
 
-    // --- AI 逻辑 ---
+    // --- AI 检测 ---
     function distance(p1, p2) {
         return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
     }
 
     function onResults(results) {
-        previewCtx.save();
         previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
         previewCtx.drawImage(results.image, 0, 0, previewCanvas.width, previewCanvas.height);
         
         if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
             const landmarks = results.multiFaceLandmarks[0];
-            drawConnectors(previewCtx, landmarks, FACEMESH_LIPS, {color: '#00d2ff', lineWidth: 1});
-
-            const mouthOpenHeight = distance(landmarks[13], landmarks[14]);
-            const mouthWidth = distance(landmarks[61], landmarks[291]);
-            const ratio = mouthOpenHeight / mouthWidth;
             
-            if (ratio > 0.32) { // 微调了阈值
+            // 绘制关键点 (仅嘴巴)
+            drawConnectors(previewCtx, landmarks, FACEMESH_LIPS, {color: '#ffffff', lineWidth: 1});
+
+            // 核心算法
+            const mouthHeight = distance(landmarks[13], landmarks[14]);
+            const mouthWidth = distance(landmarks[61], landmarks[291]);
+            const ratio = mouthHeight / mouthWidth;
+
+            // 判断
+            if (ratio > blowThreshold) {
                 isBlowing = true;
-                previewContainer.style.borderColor = "#00d2ff";
-                previewContainer.style.boxShadow = "0 0 20px #00d2ff";
+                previewWrapper.classList.add('active'); // 绿框特效
             } else {
                 isBlowing = false;
-                previewContainer.style.borderColor = "rgba(255,255,255,0.2)";
-                previewContainer.style.boxShadow = "0 4px 15px rgba(0,0,0,0.3)";
+                previewWrapper.classList.remove('active');
             }
-        } else {
-            isBlowing = false;
         }
-        previewCtx.restore();
+        // 没检测到人脸
+        else {
+            isBlowing = false;
+            previewWrapper.classList.remove('active');
+        }
     }
 
-    // --- 初始化 ---
-    const previewContainer = document.getElementById('preview-container');
-    
-    faceMesh = new FaceMesh({locateFile: (file) => {
+    // --- 启动流程 ---
+    const faceMesh = new FaceMesh({locateFile: (file) => {
         return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
     }});
 
@@ -304,22 +313,19 @@
         minDetectionConfidence: 0.5,
         minTrackingConfidence: 0.5
     });
-    
     faceMesh.onResults(onResults);
 
-    // 模型加载成功后的回调
-    startBtn.style.display = "block";
-    // 隐藏新的加载容器
-    loadingContainer.style.display = "none";
+    // AI 准备好后
+    loadingState.style.display = 'none';
+    startBtn.style.display = 'block';
+    // 更新文案
+    document.querySelector('#panel h2').innerText = "准备好了";
+    document.querySelector('#panel p').innerText = "点击下方按钮开启体验";
 
     startBtn.addEventListener('click', () => {
-        startBtn.style.display = 'none';
-        // 点击后再次显示加载容器，但更新文字
-        loadingContainer.style.display = "flex";
-        loadingTextMain.innerText = "正在启动摄像头...";
-        loadingTextSmall.innerText = "(请在弹窗中允许权限)";
-        // 移除加载动画的小球，只保留文字
-        document.querySelector('.bubble-loader').style.display = 'none';
+        // UI 切换
+        panel.style.display = 'none';
+        sliderContainer.style.display = 'block'; // 显示滑块
 
         camera = new Camera(videoElement, {
             onFrame: async () => {
@@ -328,16 +334,7 @@
             width: 480,
             height: 640
         });
-
-        camera.start().then(() => {
-            // 摄像头成功启动后，彻底隐藏加载容器
-            loadingContainer.style.display = 'none';
-            document.getElementById('hint').innerText = "尝试对准摄像头，做出“嘟嘴”动作！";
-        }).catch(err => {
-            console.error(err);
-            loadingTextMain.innerText = "无法访问摄像头";
-            loadingTextSmall.innerText = "请检查浏览器权限设置";
-        });
+        camera.start();
     });
 
 </script>
